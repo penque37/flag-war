@@ -1,0 +1,41 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #0a0a0f;
+  color: #e8e0d0;
+  font-family: Georgia, 'Times New Roman', serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(-0.4deg); }
+  50%       { transform: translateY(-8px) rotate(0.4deg); }
+}
+
+@keyframes flagWave {
+  0%, 100% { transform: skewX(0deg); }
+  25%       { transform: skewX(-2deg) scaleX(0.98); }
+  75%       { transform: skewX(2deg) scaleX(1.02); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(201, 168, 76, 0.18); border-radius: 2px; }
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+input::placeholder { color: #2e2820; }
+input:focus {
+  border-color: rgba(201, 168, 76, 0.55) !important;
+  box-shadow: 0 0 0 2px rgba(201, 168, 76, 0.07);
+}
