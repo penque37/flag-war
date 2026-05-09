@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { flagUrl } from './lib/flagUtils';
-import { loadState, saveState } from './lib/storage';
-import AdScreen        from './components/AdScreen';
-import RouletteSpinner from './components/RouletteSpinner';
-import FlagPicker      from './components/FlagPicker';
-import TierCard        from './components/TierCard';
+import { loadState, saveState, subscribeToState } from './lib/storage';
+import { COUNTRIES } from './data/countries';
+import AdScreen         from './components/AdScreen';
+import RouletteSpinner  from './components/RouletteSpinner';
+import FlagPicker       from './components/FlagPicker';
+import TierCard         from './components/TierCard';
 import LeaderboardModal from './components/LeaderboardModal';
 
-// ─── BUTTON STYLES ────────────────────────────────────────────────────────────
+const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_00w7sN1MOcB5acvexW6oo00';
+
 export function gBtn(variant) {
   if (variant === 'gold') return {
     background: 'linear-gradient(135deg,#c9a84c,#e8c86a)',
@@ -32,9 +34,9 @@ export default function App() {
   const [paidPerCountry, setPaidPerCountry] = useState({});
   const [totalRaised,    setTotalRaised]    = useState(0);
   const [totalSwaps,     setTotalSwaps]     = useState(0);
+  const [loading,        setLoading]        = useState(true);
 
   // ── UI state ──────────────────────────────────────────────────────────────
-  // flow: home | ad | roulette | pick | pay-pick | confirm-pay | success
   const [flow,            setFlow]            = useState('home');
   const [adIndex,         setAdIndex]         = useState(0);
   const [adTotal,         setAdTotal]         = useState(1);
@@ -43,19 +45,76 @@ export default function App() {
   const [prevFlag,        setPrevFlag]        = useState(null);
   const [isWaving,        setIsWaving]        = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [awaitingPayment, setAwaitingPayment] = useState(false);
 
-  // ── Load from storage on mount ────────────────────────────────────────────
+  // ── Load from Supabase on mount ───────────────────────────────────────────
   useEffect(() => {
-    const s = loadState();
-    setCurrentFlag(s.currentFlag);
-    setVotes(s.votes);
-    setPaidPerCountry(s.paidPerCountry);
-    setTotalRaised(s.totalRaised);
-    setTotalSwaps(s.totalSwaps);
+    async function init() {
+      // Check if returning from Stripe payment
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('payment') === 'success') {
+        const stored = sessionStorage.getItem('pendingFlag');
+        if (stored) {
+          const flag = JSON.parse(stored);
+          sessionStorage.removeItem('pendingFlag');
+          window.history.replaceState({}, '', window.location.pathname);
+          const s = await loadState();
+          setCurrentFlag(s.currentFlag);
+          setVotes(s.votes);
+          setPaidPerCountry(s.paidPerCountry);
+          setTotalRaised(s.totalRaised);
+          setTotalSwaps(s.totalSwaps);
+          setLoading(false);
+          await commitFlagDirect(flag, 0.99, s);
+          return;
+        }
+      }
+
+      const s = await loadState();
+      setCurrentFlag(s.currentFlag);
+      setVotes(s.votes);
+      setPaidPerCountry(s.paidPerCountry);
+      setTotalRaised(s.totalRaised);
+      setTotalSwaps(s.totalSwaps);
+      setLoading(false);
+    }
+    init();
+
+    // Real-time updates for all connected users
+    const channel = subscribeToState((s) => {
+      setCurrentFlag(s.currentFlag);
+      setVotes(s.votes);
+      setPaidPerCountry(s.paidPerCountry);
+      setTotalRaised(s.totalRaised);
+      setTotalSwaps(s.totalSwaps);
+      setIsWaving(true);
+      setTimeout(() => setIsWaving(false), 2200);
+    });
+
+    return () => channel.unsubscribe();
   }, []);
 
+  // ── Commit flag (used after returning from Stripe) ────────────────────────
+  async function commitFlagDirect(flag, amount, currentState) {
+    const nv = { ...currentState.votes,          [flag.code]: (currentState.votes[flag.code] || 0) + 1 };
+    const np = { ...currentState.paidPerCountry, [flag.code]: parseFloat(((currentState.paidPerCountry[flag.code] || 0) + amount).toFixed(2)) };
+    const nr = parseFloat((currentState.totalRaised + amount).toFixed(2));
+    const ns = currentState.totalSwaps + 1;
+
+    setCurrentFlag(flag);
+    setVotes(nv);
+    setPaidPerCountry(np);
+    setTotalRaised(nr);
+    setTotalSwaps(ns);
+
+    await saveState({ currentFlag: flag, votes: nv, paidPerCountry: np, totalRaised: nr, totalSwaps: ns });
+    setIsWaving(true);
+    setTimeout(() => setIsWaving(false), 2200);
+    setFlow('success');
+  }
+
   // ── Commit a flag change ──────────────────────────────────────────────────
-  function commitFlag(flag, amount) {
+  async function commitFlag(flag, amount) {
     setPrevFlag({ ...currentFlag });
 
     const nv = { ...votes,          [flag.code]: (votes[flag.code] || 0) + 1 };
@@ -69,11 +128,19 @@ export default function App() {
     setTotalRaised(nr);
     setTotalSwaps(ns);
 
-    saveState({ currentFlag: flag, votes: nv, paidPerCountry: np, totalRaised: nr, totalSwaps: ns });
+    await saveState({ currentFlag: flag, votes: nv, paidPerCountry: np, totalRaised: nr, totalSwaps: ns });
 
     setIsWaving(true);
     setTimeout(() => setIsWaving(false), 2200);
     setFlow('success');
+  }
+
+  // ── Stripe checkout ───────────────────────────────────────────────────────
+  function handleStripePayment() {
+    if (!pendingFlag) return;
+    sessionStorage.setItem('pendingFlag', JSON.stringify(pendingFlag));
+    const returnUrl = `${window.location.origin}?payment=success`;
+    window.location.href = `${STRIPE_PAYMENT_LINK}?success_url=${encodeURIComponent(returnUrl)}`;
   }
 
   // ── Ad flow ───────────────────────────────────────────────────────────────
@@ -94,22 +161,29 @@ export default function App() {
   const topClaims = Object.entries(votes)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 3)
-    .map(([code, count]) => {
-      const country = [
-        { code: 'US', name: 'United States' }, // fallback — real lookup in FlagPicker
-        ...Object.keys(votes).map(c => ({ code: c, name: c }))
-      ].find(c => c.code === code) || { code, name: code };
-      return { ...country, count };
-    });
+    .map(([code, count]) => ({
+      ...COUNTRIES.find(c => c.code === code) || { code, name: code },
+      count,
+    }));
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Loading screen ────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div style={{ ...styles.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ color: '#c9a84c', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.2em' }}>
+          LOADING…
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.page}>
 
       {/* Noise overlay */}
       <div style={styles.noise} />
 
-      {/* Ad screen (full-page overlay) */}
+      {/* Ad screen */}
       {flow === 'ad' && (
         <AdScreen adIndex={adIndex} total={adTotal} onDone={onAdNext} />
       )}
@@ -128,7 +202,7 @@ export default function App() {
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div style={styles.header}>
           <div style={styles.eyebrow}>⚑ Live — One Flag Rules</div>
-          <h1 style={styles.title}>FLAG WAR</h1>
+          <h1 style={styles.title}>RAGING FLAG-IT</h1>
           <p style={styles.subtitle}>Watch ads or pay to change the world's flag</p>
         </div>
 
@@ -175,9 +249,9 @@ export default function App() {
             />
             <TierCard
               emoji="⚡" title="Instant Claim"
-              desc={<>Pay <b style={{ color: '#c9a84c' }}>$1.25</b> — skip all ads, choose instantly</>}
+              desc={<>Pay <b style={{ color: '#c9a84c' }}>$0.99</b> — skip all ads, choose instantly</>}
               badge="PREMIUM" badgeColor="#7a5a1a" highlight
-              action={<button onClick={() => setFlow('pay-pick')} style={gBtn('gold')}>$1.25 — Claim</button>}
+              action={<button onClick={() => setFlow('pay-pick')} style={gBtn('gold')}>$0.99 — Claim</button>}
             />
           </div>
         )}
@@ -199,10 +273,10 @@ export default function App() {
           </div>
         )}
 
-        {/* ── PAY-PICK (instant) ───────────────────────────────────────────── */}
+        {/* ── PAY-PICK ────────────────────────────────────────────────────── */}
         {flow === 'pay-pick' && (
           <div style={styles.pickerWrap}>
-            <div style={styles.pickerLabel}>$1.25 — choose your flag</div>
+            <div style={styles.pickerLabel}>$0.99 — choose your flag</div>
             <FlagPicker
               currentCode={currentFlag.code} votes={votes}
               onPick={f => { setPendingFlag(f); setFlow('confirm-pay'); }}
@@ -229,7 +303,7 @@ export default function App() {
             </div>
 
             <div style={styles.priceBox}>
-              <div style={{ fontSize: 32, color: '#c9a84c' }}>$1.25</div>
+              <div style={{ fontSize: 32, color: '#c9a84c' }}>$0.99</div>
               <div style={{ fontSize: 10, color: '#7a7060', marginTop: 3, fontFamily: 'monospace' }}>
                 one-time · instant · no ads
               </div>
@@ -237,8 +311,7 @@ export default function App() {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setFlow('pay-pick')} style={gBtn('ghost')}>← Back</button>
-              {/* TODO: replace onClick with Stripe checkout call, then call commitFlag on success */}
-              <button onClick={() => commitFlag(pendingFlag, 1.25)} style={gBtn('gold')}>Pay & Claim ⚑</button>
+              <button onClick={handleStripePayment} style={gBtn('gold')}>Pay $0.99 & Claim ⚑</button>
             </div>
           </div>
         )}
@@ -265,7 +338,6 @@ export default function App() {
   );
 }
 
-// ─── PAGE STYLES ─────────────────────────────────────────────────────────────
 const styles = {
   page: {
     minHeight: '100vh', background: '#0a0a0f',
@@ -280,7 +352,7 @@ const styles = {
   inner:    { position: 'relative', zIndex: 1, maxWidth: 840, margin: '0 auto', padding: '0 18px 60px' },
   header:   { textAlign: 'center', padding: '42px 0 16px' },
   eyebrow:  { fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase', color: '#c9a84c', marginBottom: 10, fontFamily: 'monospace' },
-  title:    { fontSize: 'clamp(32px,8vw,68px)', margin: 0, fontWeight: 400, color: '#f0e8d8', letterSpacing: '-0.02em', lineHeight: 1 },
+  title:    { fontSize: 'clamp(28px,7vw,60px)', margin: 0, fontWeight: 400, color: '#f0e8d8', letterSpacing: '-0.02em', lineHeight: 1 },
   subtitle: { color: '#7a7060', fontSize: 13, marginTop: 7, letterSpacing: '0.04em' },
 
   heroWrap:    { display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '10px 0 20px', gap: 11 },
