@@ -45,7 +45,6 @@ export default function App() {
   const [prevFlag,        setPrevFlag]        = useState(null);
   const [isWaving,        setIsWaving]        = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [awaitingPayment, setAwaitingPayment] = useState(false);
 
   // ── Load from Supabase on mount ───────────────────────────────────────────
   useEffect(() => {
