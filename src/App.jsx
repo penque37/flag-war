@@ -7,6 +7,7 @@ import RouletteSpinner  from './components/RouletteSpinner';
 import FlagPicker       from './components/FlagPicker';
 import TierCard         from './components/TierCard';
 import LeaderboardModal from './components/LeaderboardModal';
+import PrivacyPolicy    from './components/PrivacyPolicy';
 
 const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/test_00w7sN1MOcB5acvexW6oo00';
 
@@ -28,7 +29,6 @@ export function gBtn(variant) {
 }
 
 export default function App() {
-  // ── Persistent state ──────────────────────────────────────────────────────
   const [currentFlag,    setCurrentFlag]    = useState({ code: 'US', name: 'United States' });
   const [votes,          setVotes]          = useState({});
   const [paidPerCountry, setPaidPerCountry] = useState({});
@@ -36,7 +36,6 @@ export default function App() {
   const [totalSwaps,     setTotalSwaps]     = useState(0);
   const [loading,        setLoading]        = useState(true);
 
-  // ── UI state ──────────────────────────────────────────────────────────────
   const [flow,            setFlow]            = useState('home');
   const [adIndex,         setAdIndex]         = useState(0);
   const [adTotal,         setAdTotal]         = useState(1);
@@ -45,11 +44,10 @@ export default function App() {
   const [prevFlag,        setPrevFlag]        = useState(null);
   const [isWaving,        setIsWaving]        = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showPrivacy,     setShowPrivacy]     = useState(false);
 
-  // ── Load from Supabase on mount ───────────────────────────────────────────
   useEffect(() => {
     async function init() {
-      // Check if returning from Stripe payment
       const params = new URLSearchParams(window.location.search);
       if (params.get('payment') === 'success') {
         const stored = sessionStorage.getItem('pendingFlag');
@@ -79,7 +77,6 @@ export default function App() {
     }
     init();
 
-    // Real-time updates for all connected users
     const channel = subscribeToState((s) => {
       setCurrentFlag(s.currentFlag);
       setVotes(s.votes);
@@ -93,48 +90,39 @@ export default function App() {
     return () => channel.unsubscribe();
   }, []);
 
-  // ── Commit flag (used after returning from Stripe) ────────────────────────
   async function commitFlagDirect(flag, amount, currentState) {
     const nv = { ...currentState.votes,          [flag.code]: (currentState.votes[flag.code] || 0) + 1 };
     const np = { ...currentState.paidPerCountry, [flag.code]: parseFloat(((currentState.paidPerCountry[flag.code] || 0) + amount).toFixed(2)) };
     const nr = parseFloat((currentState.totalRaised + amount).toFixed(2));
     const ns = currentState.totalSwaps + 1;
-
     setCurrentFlag(flag);
     setVotes(nv);
     setPaidPerCountry(np);
     setTotalRaised(nr);
     setTotalSwaps(ns);
-
     await saveState({ currentFlag: flag, votes: nv, paidPerCountry: np, totalRaised: nr, totalSwaps: ns });
     setIsWaving(true);
     setTimeout(() => setIsWaving(false), 2200);
     setFlow('success');
   }
 
-  // ── Commit a flag change ──────────────────────────────────────────────────
   async function commitFlag(flag, amount) {
     setPrevFlag({ ...currentFlag });
-
     const nv = { ...votes,          [flag.code]: (votes[flag.code] || 0) + 1 };
     const np = { ...paidPerCountry, [flag.code]: parseFloat(((paidPerCountry[flag.code] || 0) + amount).toFixed(2)) };
     const nr = parseFloat((totalRaised + amount).toFixed(2));
     const ns = totalSwaps + 1;
-
     setCurrentFlag(flag);
     setVotes(nv);
     setPaidPerCountry(np);
     setTotalRaised(nr);
     setTotalSwaps(ns);
-
     await saveState({ currentFlag: flag, votes: nv, paidPerCountry: np, totalRaised: nr, totalSwaps: ns });
-
     setIsWaving(true);
     setTimeout(() => setIsWaving(false), 2200);
     setFlow('success');
   }
 
-  // ── Stripe checkout ───────────────────────────────────────────────────────
   function handleStripePayment() {
     if (!pendingFlag) return;
     sessionStorage.setItem('pendingFlag', JSON.stringify(pendingFlag));
@@ -142,7 +130,6 @@ export default function App() {
     window.location.href = `${STRIPE_PAYMENT_LINK}?success_url=${encodeURIComponent(returnUrl)}`;
   }
 
-  // ── Ad flow ───────────────────────────────────────────────────────────────
   function watchAds(total, dest) {
     setAdTotal(total);
     setAdIndex(0);
@@ -156,7 +143,6 @@ export default function App() {
     else setAdIndex(next);
   }
 
-  // ── Top 3 chips ───────────────────────────────────────────────────────────
   const topClaims = Object.entries(votes)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 3)
@@ -165,7 +151,6 @@ export default function App() {
       count,
     }));
 
-  // ── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div style={{ ...styles.page, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -179,15 +164,12 @@ export default function App() {
   return (
     <div style={styles.page}>
 
-      {/* Noise overlay */}
       <div style={styles.noise} />
 
-      {/* Ad screen */}
       {flow === 'ad' && (
         <AdScreen adIndex={adIndex} total={adTotal} onDone={onAdNext} />
       )}
 
-      {/* Leaderboard modal */}
       {showLeaderboard && (
         <LeaderboardModal
           votes={votes}
@@ -196,16 +178,20 @@ export default function App() {
         />
       )}
 
+      {showPrivacy && (
+        <PrivacyPolicy onClose={() => setShowPrivacy(false)} />
+      )}
+
       <div style={styles.inner}>
 
-        {/* ── Header ──────────────────────────────────────────────────────── */}
+        {/* Header */}
         <div style={styles.header}>
           <div style={styles.eyebrow}>⚑ Live — One Flag Rules</div>
           <h1 style={styles.title}>RAGING FLAG-IT</h1>
           <p style={styles.subtitle}>Watch ads or pay to change the world's flag</p>
         </div>
 
-        {/* ── Reigning flag ───────────────────────────────────────────────── */}
+        {/* Reigning flag */}
         <div style={styles.heroWrap}>
           <div style={{
             ...styles.flagBox,
@@ -216,7 +202,7 @@ export default function App() {
           <div style={styles.countryName}>{currentFlag.name}</div>
         </div>
 
-        {/* ── Mini chips + leaderboard button ─────────────────────────────── */}
+        {/* Chips + leaderboard */}
         <div style={styles.chipsRow}>
           {topClaims.map((c, i) => (
             <div key={c.code} style={styles.chip}>
@@ -231,7 +217,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* ── HOME ────────────────────────────────────────────────────────── */}
+        {/* HOME */}
         {flow === 'home' && (
           <div style={styles.tiers}>
             <TierCard
@@ -255,12 +241,12 @@ export default function App() {
           </div>
         )}
 
-        {/* ── ROULETTE ────────────────────────────────────────────────────── */}
+        {/* ROULETTE */}
         {flow === 'roulette' && (
           <RouletteSpinner onResult={f => commitFlag(f, 0)} />
         )}
 
-        {/* ── PICK (after 3 ads) ───────────────────────────────────────────── */}
+        {/* PICK after 3 ads */}
         {flow === 'pick' && (
           <div style={styles.pickerWrap}>
             <div style={styles.pickerLabel}>Ads complete — choose your flag</div>
@@ -272,7 +258,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── PAY-PICK ────────────────────────────────────────────────────── */}
+        {/* PAY-PICK */}
         {flow === 'pay-pick' && (
           <div style={styles.pickerWrap}>
             <div style={styles.pickerLabel}>$0.99 — choose your flag</div>
@@ -284,11 +270,10 @@ export default function App() {
           </div>
         )}
 
-        {/* ── CONFIRM PAY ─────────────────────────────────────────────────── */}
+        {/* CONFIRM PAY */}
         {flow === 'confirm-pay' && pendingFlag && (
           <div style={styles.confirmWrap}>
             <div style={styles.confirmLabel}>Confirm claim</div>
-
             <div style={styles.swapRow}>
               <div style={{ textAlign: 'center', opacity: 0.4 }}>
                 <img src={flagUrl(currentFlag.code)} style={styles.swapFlagFrom} alt={currentFlag.name} />
@@ -300,14 +285,12 @@ export default function App() {
                 <div style={{ fontSize: 11, marginTop: 4 }}>{pendingFlag.name}</div>
               </div>
             </div>
-
             <div style={styles.priceBox}>
               <div style={{ fontSize: 32, color: '#c9a84c' }}>$0.99</div>
               <div style={{ fontSize: 10, color: '#7a7060', marginTop: 3, fontFamily: 'monospace' }}>
                 one-time · instant · no ads
               </div>
             </div>
-
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={() => setFlow('pay-pick')} style={gBtn('ghost')}>← Back</button>
               <button onClick={handleStripePayment} style={gBtn('gold')}>Pay $0.99 & Claim ⚑</button>
@@ -315,7 +298,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ── SUCCESS ─────────────────────────────────────────────────────── */}
+        {/* SUCCESS */}
         {flow === 'success' && (
           <div style={styles.successWrap}>
             <div style={{ fontSize: 50 }}>⚑</div>
@@ -331,6 +314,13 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Footer */}
+        <div style={styles.footer}>
+          <button onClick={() => setShowPrivacy(true)} style={styles.footerBtn}>
+            Privacy Policy
+          </button>
+        </div>
 
       </div>
     </div>
@@ -353,28 +343,24 @@ const styles = {
   eyebrow:  { fontSize: 10, letterSpacing: '0.32em', textTransform: 'uppercase', color: '#c9a84c', marginBottom: 10, fontFamily: 'monospace' },
   title:    { fontSize: 'clamp(28px,7vw,60px)', margin: 0, fontWeight: 400, color: '#f0e8d8', letterSpacing: '-0.02em', lineHeight: 1 },
   subtitle: { color: '#7a7060', fontSize: 13, marginTop: 7, letterSpacing: '0.04em' },
-
   heroWrap:    { display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '10px 0 20px', gap: 11 },
   flagBox:     { width: 248, height: 155, borderRadius: 6, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(201,168,76,0.28), 0 24px 80px rgba(0,0,0,0.85)' },
   flagImg:     { width: '100%', height: '100%', objectFit: 'cover' },
   countryName: { fontSize: 19 },
-
   chipsRow: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 24 },
   chip:     { display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 4, padding: '3px 8px', fontSize: 10 },
   chipFlag: { width: 16, height: 10, objectFit: 'cover', borderRadius: 1 },
   lbBtn:    { background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.22)', borderRadius: 4, padding: '4px 12px', color: '#c9a84c', cursor: 'pointer', fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.08em' },
-
-  tiers: { maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 },
-
+  tiers:       { maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 },
   pickerWrap:  { maxWidth: 600, margin: '0 auto' },
   pickerLabel: { fontSize: 11, letterSpacing: '0.2em', color: '#c9a84c', textTransform: 'uppercase', fontFamily: 'monospace', marginBottom: 12, textAlign: 'center' },
-
   confirmWrap:  { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20, padding: '14px 0', maxWidth: 400, margin: '0 auto' },
   confirmLabel: { fontSize: 10, letterSpacing: '0.22em', color: '#7a7060', textTransform: 'uppercase', fontFamily: 'monospace' },
   swapRow:      { display: 'flex', alignItems: 'center', gap: 18 },
   swapFlagFrom: { width: 88, height: 55, objectFit: 'cover', borderRadius: 4 },
   swapFlagTo:   { width: 108, height: 68, objectFit: 'cover', borderRadius: 4, boxShadow: '0 0 0 2px #c9a84c,0 12px 40px rgba(201,168,76,0.2)' },
   priceBox:     { background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.22)', borderRadius: 6, padding: '13px 28px', textAlign: 'center' },
-
-  successWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '26px 0', textAlign: 'center' },
+  successWrap:  { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '26px 0', textAlign: 'center' },
+  footer:    { textAlign: 'center', marginTop: 40, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.05)' },
+  footerBtn: { background: 'none', border: 'none', color: '#3a3228', cursor: 'pointer', fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.1em' },
 };
